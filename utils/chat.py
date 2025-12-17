@@ -160,6 +160,78 @@ def chat_response(
         raise Exception(f"Failed to generate response: {str(e)}")
 
 
+def chat_response_stream(
+    client: OpenAI,
+    user_question: str,
+    relevant_chunks: List[Tuple[str, float, int]],
+    conversation_history: List[dict],
+    model: str = "gpt-4o-mini"
+):
+    """
+    Generate a streaming chat response using RAG.
+    Yields chunks of text as they are generated.
+    
+    Args:
+        client: OpenAI client instance
+        user_question: The user's question
+        relevant_chunks: List of (chunk_text, similarity_score, chunk_index) tuples
+        conversation_history: Previous messages in the conversation
+        model: OpenAI chat model to use
+        
+    Yields:
+        Text chunks as they are generated
+        
+    Raises:
+        Exception: If API call fails
+    """
+    # Handle case where no relevant context found
+    if not relevant_chunks:
+        yield NO_CONTEXT_RESPONSE
+        return
+    
+    # Build context from relevant chunks
+    context = build_context_prompt(relevant_chunks)
+    
+    # Prepare the system prompt with context
+    system_message = SYSTEM_PROMPT.format(context=context)
+    
+    # Build messages array
+    messages = [{"role": "system", "content": system_message}]
+    
+    # Add conversation history (limit to last 10 exchanges)
+    history_limit = 20
+    recent_history = conversation_history[-history_limit:] if conversation_history else []
+    
+    for msg in recent_history:
+        if msg["role"] in ["user", "assistant"]:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+    
+    # Add current question
+    messages.append({"role": "user", "content": user_question})
+    
+    try:
+        # Create streaming response
+        stream = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=1000,
+            stream=True  # Enable streaming
+        )
+        
+        # Yield each chunk as it arrives
+        for chunk in stream:
+            if chunk.choices[0].delta.content is not None:
+                yield chunk.choices[0].delta.content
+                
+    except RateLimitError:
+        raise Exception("Rate limit exceeded. Please wait a moment and try again.")
+    except APIError as e:
+        raise Exception(f"OpenAI API error: {str(e)}")
+    except Exception as e:
+        raise Exception(f"Failed to generate response: {str(e)}")
+
+
 def format_sources_display(relevant_chunks: List[Tuple[str, float, int]]) -> List[dict]:
     """
     Format sources for display in the UI.

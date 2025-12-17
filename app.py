@@ -16,7 +16,7 @@ from openai import OpenAI
 # Import utility modules
 from utils.document_processor import extract_text, get_file_metadata, SUPPORTED_EXTENSIONS
 from utils.embeddings import chunk_text, create_embeddings, create_single_embedding, similarity_search
-from utils.chat import validate_api_key, chat_response, format_sources_display
+from utils.chat import validate_api_key, chat_response, chat_response_stream, format_sources_display
 
 
 # =============================================================================
@@ -278,9 +278,9 @@ def display_chat_interface():
         
         # Generate response
         with st.chat_message("assistant"):
-            with st.spinner("Analyzing document..."):
-                try:
-                    # Create embedding for the question
+            try:
+                # Create embedding for the question
+                with st.spinner("Searching document..."):
                     query_embedding = create_single_embedding(
                         st.session_state.openai_client,
                         prompt
@@ -294,44 +294,43 @@ def display_chat_interface():
                         top_k=3,
                         similarity_threshold=0.3
                     )
-                    
-                    # Generate response
-                    response, source_sections = chat_response(
+                
+                # Format sources for display
+                formatted_sources = format_sources_display(relevant_chunks)
+                
+                # Stream the response
+                response = st.write_stream(
+                    chat_response_stream(
                         st.session_state.openai_client,
                         prompt,
                         relevant_chunks,
                         st.session_state.messages[:-1]  # Exclude current user message
                     )
-                    
-                    # Format sources for display
-                    formatted_sources = format_sources_display(relevant_chunks)
-                    
-                    # Display response
-                    st.markdown(response)
-                    
-                    # Show sources
-                    if formatted_sources:
-                        with st.expander("📚 Sources used"):
-                            for source in formatted_sources:
-                                st.markdown(f"**{source['section']}** (Relevance: {source['relevance']})")
-                                st.text(source['preview'])
-                                st.divider()
-                    
-                    # Save to history
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": response,
-                        "sources": formatted_sources
-                    })
-                    
-                except Exception as e:
-                    error_msg = f"Error generating response: {str(e)}"
-                    st.error(error_msg)
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": f"⚠️ {error_msg}",
-                        "sources": []
-                    })
+                )
+                
+                # Show sources after streaming completes
+                if formatted_sources:
+                    with st.expander("📚 Sources used"):
+                        for source in formatted_sources:
+                            st.markdown(f"**{source['section']}** (Relevance: {source['relevance']})")
+                            st.text(source['preview'])
+                            st.divider()
+                
+                # Save to history
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": response,
+                    "sources": formatted_sources
+                })
+                
+            except Exception as e:
+                error_msg = f"Error generating response: {str(e)}"
+                st.error(error_msg)
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"⚠️ {error_msg}",
+                    "sources": []
+                })
 
 
 # =============================================================================
